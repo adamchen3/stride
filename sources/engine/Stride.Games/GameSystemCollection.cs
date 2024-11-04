@@ -214,11 +214,16 @@ namespace Stride.Games
             while (pendingGameSystems.Count != 0)
             {
                 var gameSystemName = GetGameSystemName(pendingGameSystems[0]);
+
                 using (var profile = Profiler.Begin(GameProfilingKeys.GameSystemInitialize, gameSystemName))
                     pendingGameSystems[0].Initialize();
+
+
+                // NOTE: 按照正常逻辑来说，此时的State应该是Initialized。这里的State怎么会有ContentLoaded的时候？？
                 if (State == GameSystemState.ContentLoaded && pendingGameSystems[0] is IContentable)
                 {
                     var contentable = (IContentable)pendingGameSystems[0];
+
                     using (var profile = Profiler.Begin(GameProfilingKeys.GameSystemLoadContent, gameSystemName))
                         contentable.LoadContent();
                 }

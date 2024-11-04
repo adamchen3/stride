@@ -12,6 +12,11 @@ using Stride.Graphics;
 using Stride.Rendering;
 using Stride.Rendering.Compositing;
 
+/**
+ * NOTE:
+ *  SceneSystem没有覆盖Initialize方法。
+ */
+
 namespace Stride.Engine
 {
     /// <summary>
@@ -60,7 +65,7 @@ namespace Stride.Engine
         /// <summary>
         /// URL of the splash screen texture loaded at initialization.
         /// </summary>
-        public string SplashScreenUrl { get; set; }
+        public string SplashScreenUrl { get; set; }  /// NOTE: 在Game.PrepareContext中赋值。
 
         /// <summary>
         /// Splash screen background color.
@@ -114,6 +119,8 @@ namespace Stride.Engine
             // Preload the scene if it exists and show splash screen
             if (InitialSceneUrl != null && content.Exists(InitialSceneUrl))
             {
+                // 如果有启动画面那就延后创建SceneInstance对象？
+                // 应该是为了异步Load吧。有启动画面那确实可以异步Load。
                 if (SplashScreenEnabled)
                     sceneTask = content.LoadAsync<Scene>(InitialSceneUrl);
                 else
@@ -126,6 +133,7 @@ namespace Stride.Engine
 
             if (InitialGraphicsCompositorUrl != null && content.Exists(InitialGraphicsCompositorUrl))
             {
+                // 有启动画面都使用了异步加载其他东西的方法。是为了不卡住启动画面？
                 if (SplashScreenEnabled)
                     compositorTask = content.LoadAsync<GraphicsCompositor>(InitialGraphicsCompositorUrl);
                 else
@@ -217,7 +225,7 @@ namespace Stride.Engine
             {
                 // Execute Draw step of SceneInstance
                 // This will run entity processors
-                SceneInstance?.Draw(renderContext);
+                SceneInstance?.Draw(renderContext); // 如果有启动画面，此时SceneInstance是空的，所以不会执行。
             }
 
             // Render phase
@@ -231,9 +239,10 @@ namespace Stride.Engine
             // Push context (pop after using)
             using (renderDrawContext.RenderContext.PushTagAndRestore(SceneInstance.Current, SceneInstance))
             {
-                GraphicsCompositor?.Draw(renderDrawContext);
+                GraphicsCompositor?.Draw(renderDrawContext); // 一样的，如果有启动画面，此时GraphicsCompositor是空的。
             }
 
+            // 处理有启动画面的情况
             //do this here, make sure GCompositor and Scene are updated/rendered the next frame!
             if (sceneTask != null && compositorTask != null)
             {
