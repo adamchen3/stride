@@ -33,7 +33,7 @@ public sealed class BepuSimulation : IDisposable
     private const string CategoryTime = "Time";
     private const string CategoryConstraints = "Constraints";
     private const string CategoryForces = "Forces";
-    private const string MaskCategory = "Collisions";
+    private const string MaskCategory = "Collision Matrix";
 
     private TimeSpan _fixedTimeStep = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 60);
     private readonly Dictionary<Type, Elider> _simulationUpdateComponents = new();
@@ -89,6 +89,15 @@ public sealed class BepuSimulation : IDisposable
             _associatedScene = value;
         }
     }
+
+    /// <summary>
+    /// The number of threads the simulation runs on.
+    /// </summary>
+    /// <remarks>
+    /// A negative value results in automatic thread selection.
+    /// </remarks>
+    [Display(-1, "Thread Count")]
+    public int ThreadCount { get; set; } = -1;
 
     /// <summary>
     /// Whether to update the simulation.
@@ -278,12 +287,12 @@ public sealed class BepuSimulation : IDisposable
 
     public BepuSimulation()
     {
-        var targetThreadCount = Math.Max(1, Environment.ProcessorCount > 4 ? Environment.ProcessorCount - 2 : Environment.ProcessorCount - 1);
+        var targetThreadCount = ThreadCount > -1 ? ThreadCount : Math.Max(1, Environment.ProcessorCount > 4 ? Environment.ProcessorCount - 2 : Environment.ProcessorCount - 1);
 
         #warning Consider wrapping stride's threadpool/dispatcher into an IThreadDispatcher and passing that over to bepu instead of using their dispatcher
         _threadDispatcher = new ThreadDispatcher(targetThreadCount);
         BufferPool = new BufferPool();
-        ContactEvents = new ContactEventsManager(_threadDispatcher, BufferPool);
+        ContactEvents = new ContactEventsManager(BufferPool, this, targetThreadCount);
 
         var strideNarrowPhaseCallbacks = new StrideNarrowPhaseCallbacks(this, ContactEvents, CollidableMaterials);
         var stridePoseIntegratorCallbacks = new StridePoseIntegratorCallbacks(CollidableMaterials);
@@ -294,7 +303,7 @@ public sealed class BepuSimulation : IDisposable
         Simulation.Solver.SubstepCount = 1;
 
         CollidableMaterials.Initialize(Simulation);
-        ContactEvents.Initialize(this);
+        ContactEvents.Initialize();
         //CollisionBatcher = new CollisionBatcher<BatcherCallbacks>(BufferPool, Simulation.Shapes, Simulation.NarrowPhase.CollisionTaskRegistry, 0, DefaultBatcherCallbacks);
     }
 
@@ -735,8 +744,10 @@ public sealed class BepuSimulation : IDisposable
             foreach (var body in _interpolatedBodies)
             {
                 body.PreviousPose = body.CurrentPose;
-                if (body.BodyReference is {} bRef)
-                    body.CurrentPose = bRef.Pose;
+
+                Debug.Assert(body.BodyReference.HasValue);
+
+                body.CurrentPose = body.BodyReference.Value.Pose;
             }
         }
 
@@ -852,11 +863,9 @@ public sealed class BepuSimulation : IDisposable
     {
         _interpolatedBodies.Add(body);
 
-        body.Entity.Transform.UpdateWorldMatrix();
-        body.Entity.Transform.WorldMatrix.Decompose(out _, out Quaternion collidableWorldRotation, out Vector3 collidableWorldTranslation);
-        body.CurrentPose.Position = (collidableWorldTranslation + body.CenterOfMass).ToNumeric();
-        body.CurrentPose.Orientation = collidableWorldRotation.ToNumeric();
-        body.PreviousPose = body.CurrentPose;
+        Debug.Assert(body.BodyReference.HasValue);
+
+        body.PreviousPose = body.CurrentPose = body.BodyReference.Value.Pose;
     }
 
     internal void UnregisterInterpolated(BodyComponent body)

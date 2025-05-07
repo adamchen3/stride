@@ -18,10 +18,20 @@ using NRigidPose = BepuPhysics.RigidPose;
 
 namespace Stride.BepuPhysics;
 
+[CategoryOrder(5, CategoryCollider)]
+[CategoryOrder(10, CategoryForces, Expand = ExpandRule.Once)]
+[CategoryOrder(15, CategoryContacts, Expand = ExpandRule.Once)]
+[CategoryOrder(20, CategoryActivity, Expand = ExpandRule.Once)]
 [DataContract(Inherited = true)]
 [DefaultEntityComponentProcessor(typeof(CollidableProcessor), ExecutionMode = ExecutionMode.Runtime)]
 public abstract class CollidableComponent : EntityComponent
 {
+    public const string CategoryCollider = "Collider";
+    public const string CategoryForces = "Forces";
+    public const string CategoryContacts = "Contacts";
+    public const string CategoryActivity = "Activity";
+
+    private static uint IdCounter;
     private static uint VersioningCounter;
 
     private float _springFrequency = 30;
@@ -47,6 +57,8 @@ public abstract class CollidableComponent : EntityComponent
     [DataMemberIgnore]
     internal uint Versioning { get; private set; }
 
+    internal uint InstanceIndex { get; } = Interlocked.Increment(ref IdCounter);
+
     /// <summary>
     /// The simulation this object belongs to, null when it is not part of a simulation.
     /// </summary>
@@ -59,7 +71,8 @@ public abstract class CollidableComponent : EntityComponent
     /// <remarks>
     /// Changing this value will reset some of the internal physics state of this body
     /// </remarks>
-    [MemberRequired, Display(Expand = ExpandRule.Always)]
+    [NotNull]
+    [Display(category: CategoryCollider, Expand = ExpandRule.Always)]
     public required ICollider Collider
     {
         get
@@ -81,8 +94,124 @@ public abstract class CollidableComponent : EntityComponent
     }
 
     /// <summary>
+    /// The bounce frequency in hz
+    /// </summary>
+    /// <remarks>
+    /// Must be low enough that the simulation can actually represent it.
+    /// If the contact is trying to make a bounce happen at 240hz,
+    /// but the integrator timestep is only 60hz,
+    /// the unrepresentable motion will get damped out and the body won't bounce as much.
+    /// </remarks>
+    [Display(category: CategoryForces)]
+    public float SpringFrequency
+    {
+        get
+        {
+            return _springFrequency;
+        }
+        set
+        {
+            _springFrequency = value;
+            TryUpdateMaterialProperties();
+        }
+    }
+
+    /// <summary>
+    /// The amount of energy/velocity lost when this collidable bounces off
+    /// </summary>
+    [Display(category: CategoryForces)]
+    public float SpringDampingRatio
+    {
+        get
+        {
+            return _springDampingRatio;
+        }
+        set
+        {
+            _springDampingRatio = value;
+            TryUpdateMaterialProperties();
+        }
+    }
+
+    [Display(category: CategoryForces)]
+    public float FrictionCoefficient
+    {
+        get => _frictionCoefficient;
+        set
+        {
+            _frictionCoefficient = value;
+            TryUpdateMaterialProperties();
+        }
+    }
+
+    /// <summary>
+    /// The maximum speed this object will exit out of the collision when overlapping another collidable
+    /// </summary>
+    [Display(category: CategoryForces)]
+    public float MaximumRecoveryVelocity
+    {
+        get => _maximumRecoveryVelocity;
+        set
+        {
+            _maximumRecoveryVelocity = value;
+            TryUpdateMaterialProperties();
+        }
+    }
+
+    /// <summary>
+    /// Which simulation this object is assigned to
+    /// </summary>
+    [NotNull]
+    [DefaultValueIsSceneBased]
+    [Display(category: CategoryContacts)]
+    public ISimulationSelector SimulationSelector
+    {
+        get
+        {
+            return _simulationSelector;
+        }
+        set
+        {
+            _simulationSelector = value;
+            if (Processor is not null)
+                ReAttach(_simulationSelector.Pick(Processor.BepuConfiguration, Entity));
+        }
+    }
+
+    /// <summary>
+    /// Controls how this object interacts with other objects, allow or prevent collisions between
+    /// it and other groups based on how <see cref="BepuSimulation.CollisionMatrix"/> is set up.
+    /// </summary>
+    [DefaultValue(CollisionLayer.Layer0)]
+    [DataAlias("CollisionMask")]
+    [Display(category: CategoryContacts)]
+    public CollisionLayer CollisionLayer
+    {
+        get => _collisionLayer;
+        set
+        {
+            _collisionLayer = value;
+            TryUpdateMaterialProperties();
+        }
+    }
+
+    /// <inheritdoc cref="Stride.BepuPhysics.Definitions.CollisionGroup"/>
+    [DataAlias("FilterByDistance")]
+    [Display(category: CategoryContacts)]
+    public CollisionGroup CollisionGroup
+    {
+        get => _collisionGroup;
+        set
+        {
+            _collisionGroup = value;
+            TryUpdateMaterialProperties();
+        }
+    }
+
+    /// <summary>
     /// Provides the ability to collect and mutate contact data when this object collides with other objects.
     /// </summary>
+    [Display(category: CategoryContacts)]
     public IContactEventHandler? ContactEventHandler
     {
         get
@@ -100,103 +229,16 @@ public abstract class CollidableComponent : EntityComponent
         }
     }
 
-    [DefaultValueIsSceneBased]
-    public ISimulationSelector SimulationSelector
-    {
-        get
-        {
-            return _simulationSelector;
-        }
-        set
-        {
-            _simulationSelector = value;
-            if (Processor is not null)
-                ReAttach(_simulationSelector.Pick(Processor.BepuConfiguration, Entity));
-        }
-    }
-
-    public float SpringFrequency
-    {
-        get
-        {
-            return _springFrequency;
-        }
-        set
-        {
-            _springFrequency = value;
-            TryUpdateMaterialProperties();
-        }
-    }
-
-    public float SpringDampingRatio
-    {
-        get
-        {
-            return _springDampingRatio;
-        }
-        set
-        {
-            _springDampingRatio = value;
-            TryUpdateMaterialProperties();
-        }
-    }
-
-    public float FrictionCoefficient
-    {
-        get => _frictionCoefficient;
-        set
-        {
-            _frictionCoefficient = value;
-            TryUpdateMaterialProperties();
-        }
-    }
-
-    public float MaximumRecoveryVelocity
-    {
-        get => _maximumRecoveryVelocity;
-        set
-        {
-            _maximumRecoveryVelocity = value;
-            TryUpdateMaterialProperties();
-        }
-    }
-
     /// <summary>
-    /// Controls how this object interacts with other objects, allow or prevent collisions between
-    /// it and other groups based on how <see cref="BepuSimulation.CollisionMatrix"/> is set up.
-    /// </summary>
-    [DefaultValue(CollisionLayer.Layer0)]
-    [DataAlias("CollisionMask")]
-    public CollisionLayer CollisionLayer
-    {
-        get => _collisionLayer;
-        set
-        {
-            _collisionLayer = value;
-            TryUpdateMaterialProperties();
-        }
-    }
-
-    /// <inheritdoc cref="Stride.BepuPhysics.Definitions.CollisionGroup"/>
-    [DataAlias("FilterByDistance")]
-    public CollisionGroup CollisionGroup
-    {
-        get => _collisionGroup;
-        set
-        {
-            _collisionGroup = value;
-            TryUpdateMaterialProperties();
-        }
-    }
-
-    /// <summary>
-    /// The center of mass of this object
+    /// The center of mass of this object in local space
     /// </summary>
     /// <remarks>
     /// This property will always return <see cref="Vector3.Zero"/> if this object is not part of a simulation yet.
     /// </remarks>
     [DataMemberIgnore]
     public Vector3 CenterOfMass { get; private set; }
+
+    protected internal abstract CollidableReference? CollidableReference { get; }
 
     public CollidableComponent()
     {
@@ -273,7 +315,7 @@ public abstract class CollidableComponent : EntityComponent
         if (reAttaching == false)
         {
             Simulation.TemporaryDetachedLookup = (getHandleValue, this);
-            Simulation.ContactEvents.Flush(); // Ensure that removing this collidable sends the appropriate contact events to listeners
+            Simulation.ContactEvents.ClearCollisionsOf(this); // Ensure that removing this collidable sends the appropriate contact events to listeners
             Simulation.TemporaryDetachedLookup = (-1, null);
         }
 
@@ -320,7 +362,21 @@ public abstract class CollidableComponent : EntityComponent
 
     protected abstract int GetHandleValue();
 
-    protected abstract void RegisterContactHandler();
-    protected abstract void UnregisterContactHandler();
-    protected abstract bool IsContactHandlerRegistered();
+
+    protected void RegisterContactHandler()
+    {
+        if (ContactEventHandler is not null && Simulation is not null)
+            Simulation.ContactEvents.Register(this);
+    }
+
+    protected void UnregisterContactHandler()
+    {
+        if (Simulation is not null)
+            Simulation.ContactEvents.Unregister(this);
+    }
+
+    protected bool IsContactHandlerRegistered()
+    {
+        return Simulation is not null && Simulation.ContactEvents.IsRegistered(this);
+    }
 }
